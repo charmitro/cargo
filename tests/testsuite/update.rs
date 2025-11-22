@@ -2161,10 +2161,25 @@ fn update_breaking_specific_packages_that_wont_update() {
     Package::new("non-semver", "2.0.0").publish();
     Package::new("transitive-incompatible", "2.0.0").publish();
 
-    p.cargo("update -Zunstable-options --breaking compatible renamed-from non-semver transitive-compatible transitive-incompatible")
+    // Test that transitive dependencies produce helpful errors
+    p.cargo("update -Zunstable-options --breaking transitive-compatible transitive-incompatible")
+        .masquerade_as_nightly_cargo(&["update-breaking"])
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package ID specification `transitive-compatible` matched a package in the dependency graph but did not match any direct dependencies that could be upgraded.
+Note: `--breaking` can only upgrade direct dependencies of workspace members.
+
+package ID specification `transitive-incompatible` matched a package in the dependency graph but did not match any direct dependencies that could be upgraded.
+Note: `--breaking` can only upgrade direct dependencies of workspace members.
+
+"#]])
+        .run();
+
+    // Test that renamed, non-semver, no-breaking-update dependencies are silently skipped (no errors)
+    p.cargo("update -Zunstable-options --breaking compatible renamed-from non-semver")
         .masquerade_as_nightly_cargo(&["update-breaking"])
         .with_stderr_data(str![[r#"
-[UPDATING] `[..]` index
+[UPDATING] `dummy-registry` index
 
 "#]])
         .run();
@@ -2779,21 +2794,30 @@ fn update_breaking_missing_package_error() {
         .add_dep(Dependency::new("transitive", "1.0.0").build())
         .publish();
 
-    // This test demonstrates the current buggy behavior where invalid package
-    // specs are silently ignored instead of reporting an error. A subsequent
-    // commit will fix this behavior and update this test to verify proper
-    // error reporting.
-    
-    // Non-existent package is silently ignored
+    // Non-existent package reports an error
     p.cargo("update -Zunstable-options --breaking no_such_crate")
         .masquerade_as_nightly_cargo(&["update-breaking"])
+        .with_status(101)
         .with_stderr_data(str![[r#"
+[ERROR] package ID specification `no_such_crate` did not match any packages
 
 "#]])
         .run();
 
-    // Valid package processes, invalid package silently ignored
+    // Valid package processes, invalid package reports error
     p.cargo("update -Zunstable-options --breaking bar no_such_crate")
+        .masquerade_as_nightly_cargo(&["update-breaking"])
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[UPDATING] `dummy-registry` index
+[UPGRADING] bar ^1.0 -> ^2.0
+[ERROR] package ID specification `no_such_crate` did not match any packages
+
+"#]])
+        .run();
+
+    // Successfully upgrade bar to add transitive to lockfile
+    p.cargo("update -Zunstable-options --breaking bar")
         .masquerade_as_nightly_cargo(&["update-breaking"])
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
@@ -2805,10 +2829,28 @@ fn update_breaking_missing_package_error() {
 "#]])
         .run();
 
-    // Transitive dependency is silently ignored (produces no output)
+    // Transitive dependency reports helpful error
     p.cargo("update -Zunstable-options --breaking transitive")
         .masquerade_as_nightly_cargo(&["update-breaking"])
+        .with_status(101)
         .with_stderr_data(str![[r#"
+[ERROR] package ID specification `transitive` matched a package in the dependency graph but did not match any direct dependencies that could be upgraded.
+Note: `--breaking` can only upgrade direct dependencies of workspace members.
+
+"#]])
+        .run();
+
+    // Multiple error types reported together
+    p.cargo("update -Zunstable-options --breaking no_such_crate transitive another_missing")
+        .masquerade_as_nightly_cargo(&["update-breaking"])
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package ID specification `no_such_crate` did not match any packages
+
+package ID specification `transitive` matched a package in the dependency graph but did not match any direct dependencies that could be upgraded.
+Note: `--breaking` can only upgrade direct dependencies of workspace members.
+
+package ID specification `another_missing` did not match any packages
 
 "#]])
         .run();
