@@ -17,7 +17,7 @@ use crate::util::{CargoResult, VersionExt};
 use crate::util::{OptVersionReq, style};
 use anyhow::Context as _;
 use cargo_util_schemas::core::PartialVersion;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use semver::{Op, Version, VersionReq};
 use std::cmp::Ordering;
@@ -238,6 +238,8 @@ pub fn upgrade_manifests(
     let mut registry = ws.package_registry()?;
     registry.lock_patches();
 
+    let mut remaining_specs: IndexSet<_> = to_update.iter().cloned().collect();
+
     for member in ws.members_mut().sorted() {
         debug!("upgrading manifest for `{}`", member.name());
 
@@ -252,9 +254,39 @@ pub fn upgrade_manifests(
                     &mut registry,
                     &mut upgrades,
                     &mut upgrade_messages,
+                    &mut remaining_specs,
                     d,
                 )
             })?;
+    }
+
+    if !remaining_specs.is_empty() {
+        let mut errors = Vec::new();
+        let previous_resolve = ops::load_pkg_lockfile(ws)?;
+
+        for spec in &remaining_specs {
+            let matches_lockfile = if let Some(ref resolve) = previous_resolve {
+                spec.query(resolve.iter()).is_ok()
+            } else {
+                false
+            };
+
+            if matches_lockfile {
+                errors.push(format!(
+                    "package ID specification `{}` matched a package in the dependency graph \
+                     but did not match any direct dependencies that could be upgraded.\n\
+                     Note: `--breaking` can only upgrade direct dependencies of workspace members.",
+                    spec
+                ));
+            } else {
+                errors.push(format!(
+                    "package ID specification `{}` did not match any packages",
+                    spec
+                ));
+            }
+        }
+
+        anyhow::bail!("{}", errors.join("\n\n"));
     }
 
     Ok(upgrades)
@@ -266,10 +298,14 @@ fn upgrade_dependency(
     registry: &mut PackageRegistry<'_>,
     upgrades: &mut UpgradeMap,
     upgrade_messages: &mut HashSet<String>,
+    remaining_specs: &mut IndexSet<PackageIdSpec>,
     dependency: Dependency,
 ) -> CargoResult<Dependency> {
     let name = dependency.package_name();
     let renamed_to = dependency.name_in_toml();
+
+    remaining_specs
+        .retain(|spec| !(spec.name() == name.as_str() && dependency.source_id().is_registry()));
 
     if name != renamed_to {
         trace!("skipping dependency renamed from `{name}` to `{renamed_to}`");
