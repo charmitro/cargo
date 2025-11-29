@@ -343,6 +343,7 @@ dependencies = [
  "os_info",
  "pasetors",
  "pathdiff",
+ "pulldown-cmark",
  "rand",
  "regex",
  "rusqlite",

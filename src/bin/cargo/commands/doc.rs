@@ -1,6 +1,6 @@
 use crate::command_prelude::*;
 
-use cargo::ops::{self, DocOptions};
+use cargo::ops::{self, DocOptions, DocShowOptions};
 
 pub fn cli() -> Command {
     subcommand("doc")
@@ -16,6 +16,15 @@ pub fn cli() -> Command {
             "Don't build documentation for dependencies",
         ))
         .arg(flag("document-private-items", "Document private items"))
+        .arg(
+            Arg::new("show")
+                .long("show")
+                .value_name("ITEM")
+                .help("Display documentation in terminal (unstable, requires -Z unstable-options)")
+                .num_args(0..=1)
+                .default_missing_value("")
+                .conflicts_with("open"),
+        )
         .arg_message_format()
         .arg_silent_suggestion()
         .arg_package_spec(
@@ -48,6 +57,30 @@ pub fn cli() -> Command {
 
 pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
+
+    // Handle --show flag for terminal documentation display
+    if let Some(item) = args.get_one::<String>("show") {
+        gctx.cli_unstable().fail_if_stable_opt("--show", 0)?;
+        let intent = UserIntent::Doc {
+            deps: false, // Don't need deps for showing
+            json: true,  // Need JSON output
+        };
+        let mut compile_opts =
+            args.compile_options(gctx, intent, Some(&ws), ProfileChecking::Custom)?;
+        compile_opts.rustdoc_document_private_items = args.flag("document-private-items");
+
+        let show_opts = DocShowOptions {
+            item: if item.is_empty() {
+                None
+            } else {
+                Some(item.clone())
+            },
+            compile_opts,
+        };
+        ops::doc_show(&ws, &show_opts)?;
+        return Ok(());
+    }
+
     let intent = UserIntent::Doc {
         deps: !args.flag("no-deps"),
         json: false,

@@ -7,6 +7,7 @@ pub use self::cargo_compile::{
     CompileOptions, compile, compile_with_exec, compile_ws, create_bcx, print, resolve_all_features,
 };
 pub use self::cargo_doc::{DocOptions, OutputFormat, doc};
+pub use self::cargo_doc_show::{DocShowOptions, doc_show};
 pub use self::cargo_fetch::{FetchOptions, fetch};
 pub use self::cargo_install::{install, install_list};
 pub use self::cargo_new::{NewOptions, NewProjectKind, VersionControl, init, new};
@@ -53,6 +54,7 @@ mod cargo_clean;
 pub(crate) mod cargo_compile;
 pub mod cargo_config;
 mod cargo_doc;
+mod cargo_doc_show;
 mod cargo_fetch;
 mod cargo_install;
 mod cargo_new;

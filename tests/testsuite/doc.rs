@@ -3200,3 +3200,163 @@ fn rebuild_tracks_checksum() {
     let doc_html = p.read_file("target/doc/foo/index.html");
     assert!(doc_html.contains("depinfo-after"));
 }
+
+// Tests for `cargo doc --show`
+
+#[cargo_test]
+fn doc_show_conflicts_with_open() {
+    let p = project().file("src/lib.rs", "").build();
+
+    p.cargo("doc --show --open")
+        .with_status(1)
+        .with_stderr_data(str![[r#"
+[ERROR] the argument '--show [<ITEM>]' cannot be used with '--open'
+
+Usage: cargo[EXE] doc --show [<ITEM>]
+
+For more information, try '--help'.
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn doc_show_requires_unstable_options() {
+    let p = project().file("src/lib.rs", "").build();
+
+    p.cargo("doc --show")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] the `--show` flag is unstable, and only available on the nightly channel of Cargo, but this is the `stable` channel
+See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information about Rust release channels.
+See https://github.com/rust-lang/cargo/issues/0 for more information about the `--show` flag.
+
+"#]])
+        .run();
+}
+
+#[cargo_test(nightly, reason = "rustdoc JSON requires nightly")]
+fn doc_show_crate_root() {
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"
+//! This is a test crate.
+//!
+//! # Example
+//! ```
+//! foo::greet();
+//! ```
+
+/// Greet the user.
+pub fn greet() {}
+"#,
+        )
+        .build();
+
+    p.cargo("doc -Z unstable-options --show")
+        .masquerade_as_nightly_cargo(&["doc-show"])
+        .with_stdout_contains("[..]crate[..]foo[..]")
+        .with_stdout_contains("This is a test crate.")
+        .with_stdout_contains("[..]fn greet[..]")
+        .run();
+}
+
+#[cargo_test(nightly, reason = "rustdoc JSON requires nightly")]
+fn doc_show_function() {
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"
+/// Greet someone by name.
+///
+/// # Arguments
+/// * `name` - The name to greet
+pub fn greet(name: &str) {
+    println!("Hello, {}!", name);
+}
+"#,
+        )
+        .build();
+
+    p.cargo("doc -Z unstable-options --show greet")
+        .masquerade_as_nightly_cargo(&["doc-show"])
+        .with_stdout_contains("[..]fn[..]greet[..]")
+        .with_stdout_contains("Greet someone by name.")
+        .run();
+}
+
+#[cargo_test(nightly, reason = "rustdoc JSON requires nightly")]
+fn doc_show_struct_with_methods() {
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"
+/// A simple counter.
+pub struct Counter {
+    /// The current count.
+    pub count: u32,
+}
+
+impl Counter {
+    /// Create a new counter.
+    pub fn new() -> Self {
+        Counter { count: 0 }
+    }
+
+    /// Increment the counter.
+    pub fn increment(&mut self) {
+        self.count += 1;
+    }
+}
+"#,
+        )
+        .build();
+
+    p.cargo("doc -Z unstable-options --show Counter")
+        .masquerade_as_nightly_cargo(&["doc-show"])
+        .with_stdout_contains("[..]struct[..]Counter[..]")
+        .with_stdout_contains("A simple counter.")
+        .with_stdout_contains("[..]fn new[..]")
+        .with_stdout_contains("[..]fn increment[..]")
+        .run();
+}
+
+#[cargo_test(nightly, reason = "rustdoc JSON requires nightly")]
+fn doc_show_method() {
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"
+/// A counter struct.
+pub struct Counter {
+    pub count: u32,
+}
+
+impl Counter {
+    /// Create a new counter starting at zero.
+    pub fn new() -> Self {
+        Counter { count: 0 }
+    }
+}
+"#,
+        )
+        .build();
+
+    p.cargo("doc -Z unstable-options --show Counter::new")
+        .masquerade_as_nightly_cargo(&["doc-show"])
+        .with_stdout_contains("[..]fn[..]new[..]")
+        .with_stdout_contains("Create a new counter starting at zero.")
+        .run();
+}
+
+#[cargo_test(nightly, reason = "rustdoc JSON requires nightly")]
+fn doc_show_item_not_found() {
+    let p = project().file("src/lib.rs", "pub fn foo() {}").build();
+
+    p.cargo("doc -Z unstable-options --show nonexistent")
+        .masquerade_as_nightly_cargo(&["doc-show"])
+        .with_status(101)
+        .with_stderr_contains("[..]not found[..]")
+        .run();
+}
